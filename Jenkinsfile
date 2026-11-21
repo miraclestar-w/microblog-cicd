@@ -63,18 +63,44 @@ spec:
       volumeMounts:
         - name: buildkit-state
           mountPath: /home/user/.local/share/buildkit
+    - name: skopeo
+      image: quay.io/skopeo/stable:v1.25.1@sha256:075359e92740bec687ed6ec8d12141bdb3666e6547dcd917657e24a7758926ed
+      imagePullPolicy: IfNotPresent
+      command: ["sleep"]
+      args: ["1d"]
+      env:
+        - name: HOME
+          value: /tmp
+        - name: TMPDIR
+          value: /tmp
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+          ephemeral-storage: 512Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
+          ephemeral-storage: 3Gi
 '''
         }
     }
     options {
         disableConcurrentBuilds()
         skipDefaultCheckout(true)
-        timeout(time: 35, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '2'))
     }
     environment {
         PIP_DISABLE_PIP_VERSION_CHECK = '1'
         PIP_NO_CACHE_DIR = '1'
+        IMAGE_REPOSITORY = 'ghcr.io/miraclestar-w/microblog-cicd'
     }
     stages {
         stage('Checkout') {
@@ -151,6 +177,21 @@ spec:
         stage('Archive image') {
             steps {
                 archiveArtifacts artifacts: 'dist/*', fingerprint: true, onlyIfSuccessful: true
+            }
+        }
+        stage('Publish to GHCR') {
+            options { timeout(time: 10, unit: 'MINUTES') }
+            steps {
+                container('skopeo') {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'ghcr-push',
+                        usernameVariable: 'GHCR_USER',
+                        passwordVariable: 'GHCR_TOKEN'
+                    )]) {
+                        sh 'sh ci/publish-ghcr.sh'
+                    }
+                }
+                archiveArtifacts artifacts: 'dist/published-*', fingerprint: true
             }
         }
     }
